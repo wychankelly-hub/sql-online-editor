@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SQLite Browser & Classroom Studio</title>
+
+  <!-- External WebAssembly & WebRTC Libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+  <!-- Firebase Realtime Database: every device talks to the cloud over normal HTTPS,
+       so students can join from ANY network (home Wi-Fi, 4G/5G, school Wi-Fi) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+  <style>
+    :root {
+      --bg-main: #f8fafc;
+      --bg-panel: #ffffff;
+      --bg-subtle: #f1f5f9;
+      --border-color: #e2e8f0;
+      --primary-color: #2563eb;
+      --primary-hover: #1d4ed8;
+      --accent-color: #059669;
+      --accent-hover: #047857;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --error-bg: #fef2f2;
+      --error-border: #fecaca;
+      --error-text: #991b1b;
+      --success-bg: #ecfdf5;
+      --success-border: #a7f3d0;
+      --success-text: #065f46;
+      --warn-bg: #fffbeb;
+      --warn-border: #fde68a;
+      --warn-text: #92400e;
+      --null-color: #94a3b8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    header {
+      background-color: var(--bg-panel);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0 20px;
+      height: 56px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+    }
+
+    .brand { font-weight: 700; font-size: 1.1rem; display: flex; align-items: center; gap: 8px; }
+
+    .nav-tabs { display: flex; gap: 8px; height: 100%; }
+
+    .tab-btn {
+      background: none; border: none; border-bottom: 3px solid transparent;
+      padding: 0 16px; font-size: 0.95rem; font-weight: 600; color: var(--text-muted);
+      cursor: pointer; display: flex; align-items: center; gap: 6px; transition: all 0.2s ease;
+    }
+    .tab-btn:hover { color: var(--text-main); }
+    .tab-btn.active { color: var(--primary-color); border-bottom-color: var(--primary-color); }
+
+    .btn {
+      background-color: var(--primary-color); color: white; border: none;
+      padding: 7px 14px; border-radius: 6px; font-weight: 500; cursor: pointer;
+      font-size: 0.875rem; transition: background 0.2s;
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    }
+    .btn:hover { background-color: var(--primary-hover); }
+    .btn-secondary { background-color: #e2e8f0; color: var(--text-main); }
+    .btn-secondary:hover { background-color: #cbd5e1; }
+    .btn-success { background-color: var(--accent-color); color: white; }
+    .btn-success:hover { background-color: var(--accent-hover); }
+    .btn-sm { padding: 4px 10px; font-size: 0.775rem; }
+
+    #drop-zone {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(255, 255, 255, 0.97); z-index: 100;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      border: 3px dashed #cbd5e1; margin: 12px; border-radius: 12px; gap: 12px;
+      text-align: center; padding: 16px;
+    }
+    #drop-zone.hidden { display: none; }
+    #drop-zone h2 { font-size: 1.6rem; }
+    #drop-zone p { color: var(--text-muted); }
+
+    .view-page { display: none; flex: 1; height: calc(100vh - 56px); overflow: hidden; }
+    .view-page.active { display: flex; }
+
+    sidebar {
+      width: 270px; background-color: var(--bg-panel);
+      border-right: 1px solid var(--border-color);
+      display: flex; flex-direction: column; overflow-y: auto;
+    }
+
+    .sidebar-header {
+      padding: 14px 16px; font-size: 0.75rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+      border-bottom: 1px solid var(--border-color); background-color: var(--bg-subtle);
+    }
+
+    .table-list { list-style: none; }
+    .table-item {
+      padding: 10px 16px; cursor: pointer; display: flex; justify-content: space-between;
+      align-items: center; border-bottom: 1px solid var(--border-color); font-size: 0.9rem;
+      transition: background 0.15s;
+    }
+    .table-item:hover { background-color: var(--bg-subtle); }
+    .table-item.active { background-color: #eff6ff; font-weight: 600; color: var(--primary-color); }
+
+    .badge {
+      background-color: var(--bg-subtle); color: var(--text-muted); font-size: 0.75rem;
+      padding: 2px 8px; border-radius: 12px; border: 1px solid var(--border-color);
+    }
+
+    .workspace { flex: 1; display: flex; flex-direction: column; overflow: hidden; background-color: var(--bg-main); }
+
+    .editor-section {
+      height: 38%; padding: 16px; background-color: var(--bg-panel);
+      border-bottom: 1px solid var(--border-color);
+      display: flex; flex-direction: column; gap: 10px;
+    }
+
+    textarea {
+      width: 100%; flex: 1;
+      font-family: 'Consolas', 'Fira Code', 'Courier New', monospace;
+      font-size: 0.95rem; padding: 12px; background-color: #0f172a; color: #38bdf8;
+      border: 1px solid var(--border-color); border-radius: 8px; resize: none; outline: none; line-height: 1.5;
+    }
+    textarea:focus { border-color: var(--primary-color); }
+
+    .editor-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .shortcut-hint { font-size: 0.8rem; color: var(--text-muted); }
+
+    .results-section { flex: 1; padding: 16px; overflow-y: auto; }
+
+    .result-container {
+      margin-bottom: 24px; background: var(--bg-panel); border-radius: 8px;
+      border: 1px solid var(--border-color); overflow: hidden; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+    }
+    .result-header {
+      padding: 10px 16px; background-color: var(--bg-subtle); font-size: 0.85rem;
+      color: var(--text-muted); border-bottom: 1px solid var(--border-color);
+    }
+    .table-wrapper { max-height: 360px; overflow: auto; }
+
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
+    th, td {
+      padding: 10px 14px; border-bottom: 1px solid var(--border-color);
+      white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+    }
+    th {
+      background-color: var(--bg-subtle); position: sticky; top: 0; font-weight: 600;
+      cursor: pointer; user-select: none;
+    }
+    th:hover { background-color: #e2e8f0; }
+    tr:hover { background-color: #f8fafc; }
+
+    .null-val { color: var(--null-color); font-style: italic; font-weight: 600; }
+
+    .error-box {
+      background-color: var(--error-bg); color: var(--error-text); padding: 14px; border-radius: 8px;
+      border: 1px solid var(--error-border); font-family: monospace; font-size: 0.875rem;
+      margin-bottom: 16px; white-space: pre-wrap;
+    }
+
+    #classroom-view { flex-direction: column; padding: 24px; overflow-y: auto; }
+
+    .role-selector-card {
+      max-width: 600px; margin: 40px auto; background: var(--bg-panel);
+      border: 1px solid var(--border-color); border-radius: 12px; padding: 32px;
+      text-align: center; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    }
+    .role-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+    .role-box {
+      border: 2px solid var(--border-color); border-radius: 10px; padding: 24px 16px;
+      cursor: pointer; transition: all 0.2s; background: var(--bg-panel);
+    }
+    .role-box:hover { border-color: var(--primary-color); background-color: #eff6ff; }
+    .role-box h4 { margin-top: 8px; font-size: 1.1rem; }
+    .role-box p { font-size: 0.8rem; color: var(--text-muted); margin-top: 4px; }
+
+    .classroom-panel { display: none; flex-direction: column; gap: 20px; max-width: 900px; width: 100%; margin: 0 auto; }
+
+    .panel-card {
+      background: var(--bg-panel); border-radius: 10px; border: 1px solid var(--border-color);
+      padding: 20px; display: flex; flex-direction: column; gap: 16px;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+    }
+
+    .input-group { display: flex; flex-direction: column; gap: 6px; }
+    .input-group label { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); }
+    .input-group input {
+      padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px;
+      font-size: 1rem;  outline: none;
+    }
+    .input-group input:focus { border-color: var(--primary-color); }
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 8px; font-size: 0.85rem;
+      padding: 6px 12px; border-radius: 20px; width: fit-content; font-weight: 600;
+    }
+    .status-disconnected { background-color: var(--error-bg); color: var(--error-text); border: 1px solid var(--error-border); }
+    .status-connected { background-color: var(--success-bg); color: var(--success-text); border: 1px solid var(--success-border); }
+    .status-pending { background-color: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background-color: currentColor; flex-shrink: 0; }
+
+    .big-code {
+      font-size: 2.4rem; font-weight: 800; letter-spacing: 0.15em; color: var(--accent-color);
+    }
+
+    .submissions-feed { display: flex; flex-direction: column; gap: 12px; max-height: 480px; overflow-y: auto; }
+
+    .sub-card {
+      border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;
+      background: var(--bg-subtle); display: flex; flex-direction: column; gap: 10px;
+    }
+    .sub-card-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; }
+    .header-session {
+      font-family: inherit; cursor: pointer; white-space: nowrap;
+    }
+    .sub-card.updated { animation: flash 1.2s ease; }
+    @keyframes flash { 0% { background: #fef9c3; } 100% { background: var(--bg-subtle); } }
+    .count-badge {
+      font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 12px;
+      background: var(--warn-bg); color: var(--warn-text); border: 1px solid var(--warn-border);
+    }
+    .sub-code-block {
+      font-family: monospace; background: #0f172a; color: #38bdf8; padding: 10px;
+      border-radius: 6px; font-size: 0.9rem; white-space: pre-wrap;
+    }
+
+    #student-feedback { display: none; font-size: 0.85rem; padding: 8px 12px; border-radius: 6px; }
+
+    @media (max-width: 768px) {
+      body { height: auto; min-height: 100vh; overflow: auto; }
+      header { height: auto; flex-wrap: wrap; padding: 8px 12px; gap: 6px; }
+      .nav-tabs { order: 3; width: 100%; height: 44px; }
+      .tab-btn { padding: 0 8px; font-size: 0.85rem; }
+      .view-page { flex-direction: column; height: auto; min-height: calc(100vh - 110px); overflow: visible; }
+      sidebar { width: 100%; height: 180px; }
+      .editor-section { height: 300px; }
+      #classroom-view { padding: 12px; }
+      .role-selector-card { margin: 12px auto; padding: 20px; }
+      .role-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Drag and Drop File Overlay -->
+  <div id="drop-zone">
+    <h2>SQLite Studio</h2>
+    <p>Drag & drop a SQLite (.db / .sqlite) file here, or click below</p>
+    <button class="btn" onclick="document.getElementById('file-input').click()">📁 Select File</button>
+    <input type="file" id="file-input" style="display: none" accept=".sqlite,.db,.sqlite3" onchange="handleFile(this.files[0])">
+    <!-- FIX: students on phones can join class without loading a DB first -->
+    <button class="btn btn-secondary" onclick="skipToStudent()">🧑‍🎓 Student: join class without a database</button>
+  </div>
+
+  <header>
+    <div class="brand">🗄️ SQLite Studio & Classroom</div>
+    <div class="nav-tabs">
+      <button class="tab-btn active" onclick="switchTab('viewer')">📊 Query Runner</button>
+      <button class="tab-btn" onclick="switchTab('classroom')">🎓 Classroom</button>
+    </div>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <button id="header-session" class="status-badge status-connected header-session" style="display:none;"
+              onclick="switchTab('classroom')" title="Go to Classroom">
+        <span class="dot"></span> <span id="header-session-text"></span>
+      </button>
+      <span id="db-status" style="font-size:0.85rem; color: var(--text-muted);">No DB Loaded</span>
+      <button class="btn btn-secondary btn-sm" onclick="resetApp()">Load Database</button>
+    </div>
+  </header>
+
+  <main style="flex:1; display:flex; flex-direction:column;">
+    <!-- TAB 1 -->
+    <div id="viewer-view" class="view-page active">
+      <sidebar>
+        <div class="sidebar-header">Database Tables</div>
+        <ul class="table-list" id="table-list"></ul>
+      </sidebar>
+
+      <div class="workspace">
+        <div class="editor-section">
+          <textarea id="sql-editor" placeholder="Write SQL queries here... (e.g. SELECT * FROM users;)"></textarea>
+          <div class="editor-actions">
+            <span class="shortcut-hint">Shortcut: <strong>Ctrl+Enter</strong> / <strong>Cmd+Enter</strong></span>
+            <button class="btn" onclick="executeEditorSQL()">▶ Run SQL</button>
+          </div>
+        </div>
+        <div class="results-section" id="results-section"></div>
+      </div>
+    </div>
+
+    <!-- TAB 2 -->
+    <div id="classroom-view" class="view-page">
+      <div id="role-selection-card" class="role-selector-card">
+        <h2>Welcome to Classroom Mode</h2>
+        <p style="color:var(--text-muted); margin-top:6px;">Select your role to proceed into the classroom session.</p>
+        <div class="role-grid">
+          <div class="role-box" onclick="selectRole('teacher')">
+            <span style="font-size:2rem;">👨‍🏫</span>
+            <h4>I am a Teacher</h4>
+            <p>Host a session, receive live SQL submissions, and grade work.</p>
+          </div>
+          <div class="role-box" onclick="selectRole('student')">
+            <span style="font-size:2rem;">🧑‍🎓</span>
+            <h4>I am a Student</h4>
+            <p>Join a teacher's session code and submit your SQL query solutions.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- TEACHER PANEL -->
+      <div id="teacher-panel" class="classroom-panel">
+        <div class="panel-card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3>👨‍🏫 Teacher Host Dashboard</h3>
+            <button class="btn btn-secondary btn-sm" onclick="switchRole()">⇄ Switch Role</button>
+          </div>
+          <p style="font-size:0.875rem; color:var(--text-muted);">
+            Create a session, then show the 4-digit code on the projector. Students can join from any network.
+            Submissions are saved in the cloud, so you can refresh this page and resume the session.
+          </p>
+
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button class="btn" onclick="initTeacherHost()">⚡ Create Session Code</button>
+            <button class="btn btn-secondary" id="copy-code-btn" style="display:none;" onclick="copySessionCode()">📋 Copy Code</button>
+            <button class="btn btn-secondary" id="end-session-btn" style="display:none;" onclick="endTeacherSession()">⏹ End Session</button>
+            <button class="btn btn-secondary" id="resume-btn" style="display:none;" onclick="resumeTeacherSession()">↩ Resume session <span id="resume-code"></span></button>
+          </div>
+
+          <div id="teacher-status" class="status-badge status-disconnected" style="display:none;">
+            <span class="dot"></span> <span id="teacher-status-text">Session Offline</span>
+          </div>
+
+          <div id="session-code-display" style="display:none; background:var(--bg-subtle); padding:16px; border-radius:8px; border:1px solid var(--border-color);">
+            <div style="font-size:0.9rem; color:var(--text-muted); font-weight:600;">Students enter this code:</div>
+            <div class="big-code" id="code-val">----</div>
+            <div style="font-size:0.85rem; color:var(--text-muted);">Students connected: <strong id="student-count">0</strong></div>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <h4>Live Submissions Feed <span style="font-weight:500; color:var(--text-muted); font-size:0.85rem;">(<span id="submitted-count">0</span> students submitted)</span></h4>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-secondary btn-sm" onclick="exportSubmissionsJSON()">📥 Export JSON</button>
+              <button class="btn btn-secondary btn-sm" onclick="clearFeed()">🗑️ Delete All Submissions</button>
+            </div>
+          </div>
+          <div class="submissions-feed" id="teacher-submissions-feed">
+            <div id="feed-empty" style="color:var(--text-muted); font-size:0.85rem;">No student submissions received yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STUDENT PANEL -->
+      <div id="student-panel" class="classroom-panel">
+        <div class="panel-card">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <h3>🧑‍🎓 Student Submission Portal</h3>
+            <button class="btn btn-secondary btn-sm" onclick="switchRole()">⇄ Switch Role</button>
+          </div>
+
+          <div class="input-group">
+            <label for="student-name">Your Full Name / Class No.:</label>
+            <input type="text" id="student-name" placeholder="e.g. 5A-12 Chan Tai Man" autocomplete="off">
+          </div>
+
+          <div class="input-group">
+            <label for="join-code">Teacher's 4-digit Session Code:</label>
+            <!-- FIX: numeric keypad, no auto-capitalise / autocorrect on phones -->
+            <input type="text" id="join-code" placeholder="e.g. 4821" inputmode="numeric" pattern="[0-9]*"
+                   maxlength="4" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+          </div>
+
+          <button class="btn" onclick="connectToTeacher()">🔗 Connect to Teacher</button>
+
+          <div id="student-status" class="status-badge status-disconnected">
+            <span class="dot"></span> <span id="student-status-text">Not Connected</span>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <h4>Submit Query</h4>
+            <button class="btn btn-secondary btn-sm" onclick="syncFromTab1()">Copy query from Query Runner</button>
+          </div>
+          <div class="input-group">
+            <textarea id="student-sql-text" style="height:140px;" placeholder="Write or paste your SQL solution query here..."
+                      autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+          </div>
+          <button class="btn btn-success" onclick="submitStudentAnswer()">🚀 Submit Query to Teacher</button>
+          <div id="student-feedback"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+ 	const FIREBASE_CONFIG = {
+      	apiKey: "AIzaSyDqcVJoWEkfXB_dnV-tC2zcaLTsj-Ie6TE",
+      	authDomain: "sql-online-608a5.firebaseapp.com",
+      	databaseURL: "https://sql-online-608a5-default-rtdb.asia-southeast1.firebasedatabase.app",
+      	messagingSenderId: "821496121727",
+      	appId: "1:821496121727:web:c5fc21eff09d0d078e324a",
+    	};
+    const ROOT = 'sqlClassroom';          // top-level folder in the database
+    const SESSION_MAX_HOURS = 12;         // an old code can be reused after this
+    const TEACHER_CODE_KEY = 'sqlClassroomTeacherCode';
+
+    let db = null;            // SQLite database (sql.js)
+    let SQL = null;
+    let currentSort = { colIndex: -1, ascending: true };
+
+    let fb = null;            // Firebase database handle
+    let isOnline = false;
+
+    let teacherCode = null;
+    let teacherRefs = [];
+    let receivedSubmissions = [];
+
+    let studentCode = null;
+    let studentName = '';
+    let studentPresenceRef = null;
+
+    let studentCountValue = 0;          // students online (teacher view)
+    let latestByStudent = new Map();    // one card per student: key → { entry, card }
+    let studentMetaRef = null;
+
+    initSqlJs({
+      locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+    }).then(sqlModule => {
+      SQL = sqlModule;
+    }).catch(err => console.error("Error loading SQLite WebAssembly module:", err));
+
+    /* ---------- Navigation ---------- */
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.view-page').forEach(page => page.classList.remove('active'));
+      if (tabName === 'viewer') {
+        document.querySelectorAll('.tab-btn')[0].classList.add('active');
+        document.getElementById('viewer-view').classList.add('active');
+      } else {
+        document.querySelectorAll('.tab-btn')[1].classList.add('active');
+        document.getElementById('classroom-view').classList.add('active');
+      }
+    }
+
+    function selectRole(role) {
+      document.getElementById('role-selection-card').style.display = 'none';
+      document.getElementById('teacher-panel').style.display = role === 'teacher' ? 'flex' : 'none';
+      document.getElementById('student-panel').style.display = role === 'student' ? 'flex' : 'none';
+      if (role === 'teacher') offerResume();
+    }
+
+    function switchRole() {
+      document.getElementById('teacher-panel').style.display = 'none';
+      document.getElementById('student-panel').style.display = 'none';
+      document.getElementById('role-selection-card').style.display = 'block';
+    }
+
+    function skipToStudent() {
+      document.getElementById('drop-zone').classList.add('hidden');
+      switchTab('classroom');
+      selectRole('student');
+    }
+
+    /* ---------- File loading ---------- */
+    const dropZone = document.getElementById('drop-zone');
+    window.addEventListener('dragover', e => e.preventDefault());
+    window.addEventListener('drop', e => e.preventDefault());
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = '#2563eb'; });
+    dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = '#cbd5e1'; });
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.style.borderColor = '#cbd5e1';
+      if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    });
+
+    function handleFile(file) {
+      if (!file) return;
+      if (!SQL) return alert("The SQLite engine is still loading. Wait a few seconds and try again.");
+      const reader = new FileReader();
+      reader.onload = function() {
+        try {
+          if (db) db.close();
+          db = new SQL.Database(new Uint8Array(reader.result));
+          dropZone.classList.add('hidden');
+          document.getElementById('db-status').innerText = `Loaded: ${file.name}`;
+          loadSidebarTables();
+        } catch (err) { alert("Error opening file: " + err.message); }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function resetApp() {
+      // Note: does NOT disconnect the classroom session
+      if (db) { db.close(); db = null; }
+      document.getElementById('table-list').innerHTML = '';
+      document.getElementById('results-section').innerHTML = '';
+      document.getElementById('db-status').innerText = 'No DB Loaded';
+      document.getElementById('file-input').value = '';
+      dropZone.classList.remove('hidden');
+    }
+
+    function loadSidebarTables() {
+      const sidebarList = document.getElementById('table-list');
+      sidebarList.innerHTML = '';
+      const res = db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;");
+      if (!res.length || !res[0].values.length) {
+        sidebarList.innerHTML = '<li style="padding: 12px; font-size: 0.85rem; color: var(--text-muted)">No tables found</li>';
+        return;
+      }
+      res[0].values.forEach(([tableName]) => {
+        let count = 0;
+        try { count = db.exec(`SELECT COUNT(*) FROM "${tableName}"`)[0].values[0][0]; } catch(e) {}
+        const li = document.createElement('li');
+        li.className = 'table-item';
+        li.innerHTML = `<span>${escapeHTML(tableName)}</span><span class="badge">${count} rows</span>`;
+        li.onclick = () => {
+          document.querySelectorAll('.table-item').forEach(el => el.classList.remove('active'));
+          li.classList.add('active');
+          displayTableData(tableName);
+        };
+        sidebarList.appendChild(li);
+      });
+    }
+
+    function displayTableData(tableName) {
+      const container = document.getElementById('results-section');
+      container.innerHTML = '';
+      try {
+        const res = db.exec(`SELECT * FROM "${tableName}" LIMIT 500;`);
+        if (!res.length) {
+          container.innerHTML = `<div class="result-container"><div class="result-header">Table '${escapeHTML(tableName)}' is empty.</div></div>`;
+          return;
+        }
+        renderResultSet(res[0], container, `Table View: ${tableName}`);
+      } catch (err) { renderError(err.message, container); }
+    }
+
+    function executeEditorSQL() {
+      if (!db) return alert("Please load a database first.");
+      let sqlText = document.getElementById('sql-editor').value.trim();
+      if (!sqlText) return;
+      sqlText = sqlText.replace(/\bMINUS\b/gi, 'EXCEPT');
+
+      const container = document.getElementById('results-section');
+      container.innerHTML = '';
+      try {
+        const results = db.exec(sqlText);
+        if (!results.length) {
+          container.innerHTML = `<div class="result-container"><div class="result-header">Query executed successfully. No rows returned.</div></div>`;
+          loadSidebarTables();
+          return;
+        }
+        results.forEach((res, index) => renderResultSet(res, container, `Result Set #${index + 1}`));
+        loadSidebarTables();
+      } catch (err) { renderError(err.message, container); }
+    }
+
+    document.getElementById('sql-editor').addEventListener('keydown', function(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); executeEditorSQL(); }
+    });
+
+    function renderResultSet(result, targetContainer, title = 'Query Result') {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'result-container';
+      wrapper.innerHTML = `<div class="result-header">${escapeHTML(title)} — ${result.values.length} row(s), ${result.columns.length} column(s)</div>`;
+      const tableWrapper = document.createElement('div');
+      tableWrapper.className = 'table-wrapper';
+      const table = document.createElement('table');
+      const trHead = document.createElement('tr');
+      result.columns.forEach((col, idx) => {
+        const th = document.createElement('th');
+        th.innerText = col;
+        th.onclick = () => sortTable(table, idx);
+        trHead.appendChild(th);
+      });
+      table.appendChild(document.createElement('thead')).appendChild(trHead);
+      const tbody = document.createElement('tbody');
+      result.values.forEach(row => {
+        const tr = document.createElement('tr');
+        row.forEach(val => {
+          const td = document.createElement('td');
+          td.innerHTML = (val === null) ? '<span class="null-val">NULL</span>' : escapeHTML(String(val));
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      tableWrapper.appendChild(table);
+      wrapper.appendChild(tableWrapper);
+      targetContainer.appendChild(wrapper);
+    }
+
+    function renderError(message, targetContainer) {
+      const errBox = document.createElement('div');
+      errBox.className = 'error-box';
+      errBox.innerText = `SQL Error: ${message}`;
+      targetContainer.appendChild(errBox);
+    }
+
+    function sortTable(table, colIndex) {
+      const tbody = table.querySelector('tbody');
+      const rows = Array.from(tbody.querySelectorAll('tr'));
+      const isAscending = (currentSort.colIndex === colIndex) ? !currentSort.ascending : true;
+      currentSort = { colIndex, ascending: isAscending };
+      rows.sort((rowA, rowB) => {
+        const cellA = rowA.children[colIndex].innerText.trim();
+        const cellB = rowB.children[colIndex].innerText.trim();
+        if (cellA === 'NULL') return 1;
+        if (cellB === 'NULL') return -1;
+        const numA = Number(cellA), numB = Number(cellB);
+        if (!isNaN(numA) && !isNaN(numB)) return isAscending ? numA - numB : numB - numA;
+        return isAscending ? cellA.localeCompare(cellB) : cellB.localeCompare(cellA);
+      });
+      rows.forEach(row => tbody.appendChild(row));
+    }
+
+    function escapeHTML(str) {
+      return String(str).replace(/[&<>'"]/g, tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag]));
+    }
+
+    /* ---------- Shared Firebase helpers ---------- */
+    function firebaseReady() {
+      if (typeof firebase === 'undefined') {
+        alert("The Firebase library did not load.\nCheck the internet connection or whether the web filter blocks www.gstatic.com.");
+        return false;
+      }
+      if (!FIREBASE_CONFIG.databaseURL || FIREBASE_CONFIG.databaseURL.includes('PASTE')) {
+        alert("Teacher setup needed: paste your Firebase config into FIREBASE_CONFIG at the top of the <script> section.");
+        return false;
+      }
+      if (!fb) {
+        firebase.initializeApp(FIREBASE_CONFIG);
+        fb = firebase.database();
+        watchConnection();
+      } else {
+        fb.goOnline();   // reconnect if we went offline after a session ended
+      }
+      return true;
+    }
+
+    function withTimeout(promise, ms) {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+      ]);
+    }
+
+    function explainFbError(err) {
+      const m = (err && (err.code || err.message)) || String(err);
+      if (/permission/i.test(m)) return 'Permission denied. The teacher needs to update the Firebase database Rules (see setup guide).';
+      if (/timeout/i.test(m))    return 'No response from the server. Check the internet connection or school web filter.';
+      return m;
+    }
+
+    function setBadge(elemId, textId, text, state) {
+      const el = document.getElementById(elemId);
+      el.style.display = 'inline-flex';
+      el.className = 'status-badge ' + ({ ok: 'status-connected', wait: 'status-pending', bad: 'status-disconnected' }[state]);
+      document.getElementById(textId).innerText = text;
+    }
+
+    // Firebase reconnects automatically after Wi-Fi drops / screen lock; we just show the state.
+    function watchConnection() {
+      fb.ref('.info/connected').on('value', snap => {
+        isOnline = snap.val() === true;
+        if (teacherCode) {
+          setBadge('teacher-status', 'teacher-status-text',
+            isOnline ? 'Session Online' : 'Offline — reconnecting automatically…', isOnline ? 'ok' : 'wait');
+        }
+        if (studentCode) {
+          if (isOnline) {
+            registerStudentPresence();   // re-appear in the teacher's count after a reconnect
+            setStudentStatus(`Connected to teacher (session ${studentCode})`, 'ok');
+          } else {
+            setStudentStatus('Offline — reconnecting automatically…', 'wait');
+          }
+        }
+        updateHeaderSession();
+      });
+    }
+
+    // Session status in the top bar, visible on every tab
+    function updateHeaderSession() {
+      const el = document.getElementById('header-session');
+      let text = '';
+      if (teacherCode)      text = `Session ${teacherCode} · ${studentCountValue} online`;
+      else if (studentCode) text = `Joined ${studentCode} · ${studentName}`;
+      if (!text) { el.style.display = 'none'; return; }
+      if (!isOnline) text += ' · reconnecting…';
+      el.className = 'status-badge header-session ' + (isOnline ? 'status-connected' : 'status-pending');
+      document.getElementById('header-session-text').innerText = text;
+      el.style.display = 'inline-flex';
+    }
+
+    // Fully close the connection to Firebase so this device stops using one of the
+    // ~100 simultaneous connection slots of the free plan.
+    function releaseConnection() {
+      if (fb) fb.goOffline();
+      isOnline = false;
+    }
+
+    /* ---------- Teacher ---------- */
+    async function initTeacherHost() {
+      if (!firebaseReady()) return;
+      if (teacherCode && !confirm(`Session ${teacherCode} is still running. End it and create a new one?`)) return;
+      setBadge('teacher-status', 'teacher-status-text', 'Creating session…', 'wait');
+      if (teacherCode) {
+        // End the old session first so its students are disconnected too
+        const oldCode = teacherCode;
+        stopTeacherListeners();
+        teacherCode = null;
+        try {
+          await fb.ref(`${ROOT}/${oldCode}/meta/active`).set(false);
+          await fb.ref(`${ROOT}/${oldCode}/students`).remove();
+        } catch (e) { console.warn(e); }
+      }
+      try {
+        let code = null;
+        for (let i = 0; i < 10 && !code; i++) {
+          const c = String(Math.floor(1000 + Math.random() * 9000));
+          const result = await withTimeout(fb.ref(`${ROOT}/${c}/meta`).transaction(cur => {
+            if (cur && cur.active && Date.now() - cur.createdAt < SESSION_MAX_HOURS * 3600 * 1000) return; // taken → abort
+            return { active: true, createdAt: Date.now() };
+          }), 10000);
+          if (result.committed) {
+            code = c;
+            await fb.ref(`${ROOT}/${c}/submissions`).remove();   // wipe leftovers from an old session
+            await fb.ref(`${ROOT}/${c}/students`).remove();
+          }
+        }
+        if (!code) throw new Error('Could not find a free code. Try again.');
+        startTeacherSession(code);
+      } catch (err) {
+        console.error(err);
+        setBadge('teacher-status', 'teacher-status-text', explainFbError(err), 'bad');
+      }
+    }
+
+    function startTeacherSession(code) {
+      stopTeacherListeners();
+      teacherCode = code;
+      try { localStorage.setItem(TEACHER_CODE_KEY, code); } catch (e) {}
+
+      receivedSubmissions = [];
+      resetFeedUI();
+
+      document.getElementById('session-code-display').style.display = 'block';
+      document.getElementById('code-val').innerText = code;
+      document.getElementById('copy-code-btn').style.display = 'inline-flex';
+      document.getElementById('end-session-btn').style.display = 'inline-flex';
+      document.getElementById('resume-btn').style.display = 'none';
+      setBadge('teacher-status', 'teacher-status-text', isOnline ? 'Session Online' : 'Connecting…', isOnline ? 'ok' : 'wait');
+
+      const subRef = fb.ref(`${ROOT}/${code}/submissions`);
+      subRef.on('child_added', snap => {
+        const d = snap.val() || {};
+        addSubmissionToFeed(d.studentName, d.sqlQuery, d.clientTime);
+      });
+
+      const stuRef = fb.ref(`${ROOT}/${code}/students`);
+      stuRef.on('value', snap => {
+        studentCountValue = snap.numChildren();
+        document.getElementById('student-count').innerText = studentCountValue;
+        updateHeaderSession();
+      });
+
+      teacherRefs = [subRef, stuRef];
+      updateHeaderSession();
+    }
+
+    function stopTeacherListeners() {
+      teacherRefs.forEach(r => r.off());
+      teacherRefs = [];
+    }
+
+    function offerResume() {
+      if (teacherCode) return;
+      let saved = null;
+      try { saved = localStorage.getItem(TEACHER_CODE_KEY); } catch (e) {}
+      if (saved) {
+        document.getElementById('resume-code').innerText = saved;
+        document.getElementById('resume-btn').style.display = 'inline-flex';
+      }
+    }
+
+    async function resumeTeacherSession() {
+      if (!firebaseReady()) return;
+      let saved = null;
+      try { saved = localStorage.getItem(TEACHER_CODE_KEY); } catch (e) {}
+      if (!saved) return;
+      try {
+        const snap = await withTimeout(fb.ref(`${ROOT}/${saved}/meta`).get(), 10000);
+        const meta = snap.val();
+        if (meta && meta.active) {
+          startTeacherSession(saved);
+        } else {
+          try { localStorage.removeItem(TEACHER_CODE_KEY); } catch (e) {}
+          document.getElementById('resume-btn').style.display = 'none';
+          alert('That session has ended. Create a new session code.');
+        }
+      } catch (err) {
+        setBadge('teacher-status', 'teacher-status-text', explainFbError(err), 'bad');
+      }
+    }
+
+    async function endTeacherSession() {
+      if (!teacherCode) return;
+      if (!confirm(`End session ${teacherCode}?\nAll students will be disconnected and can no longer submit.`)) return;
+      const code = teacherCode;
+      setBadge('teacher-status', 'teacher-status-text', 'Ending session…', 'wait');
+      try {
+        await withTimeout(fb.ref(`${ROOT}/${code}/meta/active`).set(false), 10000); // students' pages see this and disconnect
+        await fb.ref(`${ROOT}/${code}/students`).remove();
+      } catch (e) { console.warn(e); }
+      stopTeacherListeners();
+      teacherCode = null;
+      try { localStorage.removeItem(TEACHER_CODE_KEY); } catch (e) {}
+      document.getElementById('session-code-display').style.display = 'none';
+      document.getElementById('copy-code-btn').style.display = 'none';
+      document.getElementById('end-session-btn').style.display = 'none';
+      document.getElementById('resume-btn').style.display = 'none';
+      releaseConnection();   // the teacher's own slot is freed too
+      studentCountValue = 0;
+      updateHeaderSession();
+      setBadge('teacher-status', 'teacher-status-text',
+        'Session ended. All students disconnected. Submissions shown below are kept until you close this page (use Export JSON to save them).', 'bad');
+    }
+
+    function copySessionCode() {
+      const code = document.getElementById('code-val').innerText;
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(code).then(() => alert(`Copied session code: ${code}`))
+          .catch(() => prompt('Copy this code:', code));
+      } else {
+        prompt('Copy this code:', code);
+      }
+    }
+
+    function resetFeedUI() {
+      latestByStudent = new Map();
+      document.getElementById('submitted-count').innerText = 0;
+      document.getElementById('teacher-submissions-feed').innerHTML =
+        '<div id="feed-empty" style="color:var(--text-muted); font-size:0.85rem;">No student submissions received yet.</div>';
+    }
+
+    // Same student = same class no. / name (ignoring case and extra spaces)
+    function studentKey(name) {
+      return String(name || '(no name)').trim().replace(/\s+/g, ' ').toLowerCase();
+    }
+
+    function addSubmissionToFeed(studentName, sqlQuery, timestamp) {
+      const timeStr = timestamp || new Date().toLocaleTimeString();
+      receivedSubmissions.push({ studentName, sqlQuery, timeStr });   // Export JSON keeps every attempt
+
+      const empty = document.getElementById('feed-empty');
+      if (empty) empty.remove();
+
+      const feed = document.getElementById('teacher-submissions-feed');
+      const key = studentKey(studentName);
+      let item = latestByStudent.get(key);
+
+      if (!item) {
+        const card = document.createElement('div');
+        card.className = 'sub-card';
+        card.innerHTML = `
+          <div class="sub-card-header">
+            <strong>🧑‍🎓 <span class="sub-name"></span> <span class="count-badge" style="display:none;"></span></strong>
+            <span class="sub-time" style="color:var(--text-muted);"></span>
+          </div>
+          <div class="sub-code-block"></div>
+          <div><button class="btn btn-secondary btn-sm">📋 Load & Run in SQL Editor</button></div>
+        `;
+        item = { card, count: 0, sqlQuery: '' };
+        card.querySelector('button').addEventListener('click', () => loadQueryInEditor(item.sqlQuery));
+        latestByStudent.set(key, item);
+        document.getElementById('submitted-count').innerText = latestByStudent.size;
+      }
+
+      // Show only the latest answer
+      item.count += 1;
+      item.sqlQuery = sqlQuery || '';
+      const card = item.card;
+      card.querySelector('.sub-name').textContent = studentName || '(no name)';
+      card.querySelector('.sub-time').textContent = item.count > 1 ? `Latest: ${timeStr}` : timeStr;
+      card.querySelector('.sub-code-block').textContent = item.sqlQuery;
+      const badge = card.querySelector('.count-badge');
+      if (item.count > 1) {
+        badge.textContent = `Submitted ${item.count} times`;
+        badge.style.display = 'inline-block';
+      }
+
+      // Move to the top and flash so the teacher notices the update
+      feed.prepend(card);
+      card.classList.remove('updated');
+      void card.offsetWidth;
+      card.classList.add('updated');
+    }
+
+    function loadQueryInEditor(query) {
+      document.getElementById('sql-editor').value = query;
+      switchTab('viewer');
+      executeEditorSQL();
+    }
+
+    async function clearFeed() {
+      if (!teacherCode) { receivedSubmissions = []; resetFeedUI(); return; }
+      if (!confirm('Delete ALL submissions of this session? Export JSON first if you need a record.')) return;
+      stopTeacherListeners();
+      try { await fb.ref(`${ROOT}/${teacherCode}/submissions`).remove(); } catch (e) { alert(explainFbError(e)); }
+      startTeacherSession(teacherCode);   // re-attach listeners on an empty feed
+    }
+
+    function exportSubmissionsJSON() {
+      const blob = new Blob([JSON.stringify(receivedSubmissions, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sql_submissions_${teacherCode || 'session'}_${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    /* ---------- Student ---------- */
+    function setStudentStatus(text, state) { setBadge('student-status', 'student-status-text', text, state); }
+
+    async function connectToTeacher() {
+      const digits = document.getElementById('join-code').value.replace(/\D/g, '');
+      const name = document.getElementById('student-name').value.trim();
+      if (digits.length !== 4 || !name) return alert("Please enter your name and the 4-digit session code.");
+      if (!firebaseReady()) return;
+
+      disconnectStudent();
+      setStudentStatus('Connecting…', 'wait');
+
+      try {
+        const snap = await withTimeout(fb.ref(`${ROOT}/${digits}/meta`).get(), 10000);
+        const meta = snap.val();
+        if (!meta || !meta.active) {
+          setStudentStatus('Session code not found or already ended. Check the 4 digits with your teacher.', 'bad');
+          return;
+        }
+        studentCode = digits;
+        studentName = name;
+        await registerStudentPresence();
+        setStudentStatus(`Connected to teacher (session ${digits})`, 'ok');
+        updateHeaderSession();
+
+        // Tell the student if the teacher ends the session
+        studentMetaRef = fb.ref(`${ROOT}/${digits}/meta/active`);
+        studentMetaRef.on('value', s => {
+          if (studentCode === digits && s.val() === false) {
+            endStudentConnection('The teacher has ended this session. You can close this page now.');
+          }
+        });
+      } catch (err) {
+        console.error(err);
+        setStudentStatus(explainFbError(err), 'bad');
+      }
+    }
+
+    async function registerStudentPresence() {
+      if (!studentCode) return;
+      if (!studentPresenceRef) studentPresenceRef = fb.ref(`${ROOT}/${studentCode}/students`).push();
+      try {
+        await studentPresenceRef.onDisconnect().remove();   // auto-removed when the phone goes offline
+        await studentPresenceRef.set({ name: studentName, joinedAt: firebase.database.ServerValue.TIMESTAMP });
+      } catch (e) { console.warn('Presence error:', e); }
+    }
+
+    // Called when the session ends: leave the class AND close the Firebase connection
+    async function endStudentConnection(message) {
+      const presence = studentPresenceRef;
+      if (studentMetaRef) { studentMetaRef.off(); studentMetaRef = null; }
+      studentPresenceRef = null;
+      studentCode = null;
+      if (presence) { try { await withTimeout(presence.remove(), 3000); } catch (e) {} }
+      releaseConnection();
+      setStudentStatus(message, 'bad');
+      updateHeaderSession();
+      showStudentFeedback('Session closed. Submissions are no longer accepted.', 'bad');
+    }
+
+    function disconnectStudent() {
+      if (studentMetaRef) { studentMetaRef.off(); studentMetaRef = null; }
+      if (studentPresenceRef) { studentPresenceRef.remove().catch(() => {}); studentPresenceRef = null; }
+      studentCode = null;
+      updateHeaderSession();
+    }
+
+    function showStudentFeedback(text, state) {
+      const fbBox = document.getElementById('student-feedback');
+      fbBox.style.display = 'block';
+      const colors = {
+        ok:   ['var(--success-bg)', 'var(--success-text)', 'var(--success-border)'],
+        wait: ['var(--warn-bg)', 'var(--warn-text)', 'var(--warn-border)'],
+        bad:  ['var(--error-bg)', 'var(--error-text)', 'var(--error-border)']
+      }[state];
+      fbBox.style.background = colors[0];
+      fbBox.style.color = colors[1];
+      fbBox.style.border = `1px solid ${colors[2]}`;
+      fbBox.innerText = text;
+    }
+
+    function syncFromTab1() {
+      document.getElementById('student-sql-text').value = document.getElementById('sql-editor').value;
+    }
+
+    async function sendSubmission(sqlQuery) {
+      if (!studentCode) return alert("You are not connected to a teacher session. Please connect first.");
+      const clientTime = new Date().toLocaleTimeString();
+      showStudentFeedback('⏳ Sending…', 'wait');
+      try {
+        await withTimeout(
+          fb.ref(`${ROOT}/${studentCode}/submissions`).push({
+            studentName, sqlQuery, clientTime,
+            sentAt: firebase.database.ServerValue.TIMESTAMP
+          }),
+          10000
+        );
+        showStudentFeedback(`✅ Submitted at ${clientTime}. Your teacher can see it now.`, 'ok');
+      } catch (err) {
+        if (/timeout/i.test(err.message)) {
+          showStudentFeedback('⚠️ Not confirmed yet: your connection is weak. It will be sent automatically when you are back online. Keep this page open.', 'wait');
+        } else {
+          showStudentFeedback('❌ Not sent: ' + explainFbError(err), 'bad');
+        }
+      }
+    }
+
+    function submitStudentAnswer() {
+      if (!studentCode) return alert("You are not connected to a teacher session. Please connect first.");
+      const sqlQuery = document.getElementById('student-sql-text').value.trim();
+      if (!sqlQuery) return alert("Please type or copy a SQL query first.");
+      sendSubmission(sqlQuery);
+    }
+
+  </script>
+</body>
+</html>
