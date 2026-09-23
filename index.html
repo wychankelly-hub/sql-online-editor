@@ -553,7 +553,35 @@
         renderResultSet(res[0], container, `Table View: ${tableName}`);
       } catch (err) { renderError(err.message, container); }
     }
+    function checkJoinHasOn(sql) {
+      // Remove comments and string contents so keywords inside them are ignored
+      const s = sql
+        .replace(/--[^\n]*/g, ' ')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .replace(/'(?:[^']|'')*'/g, "''")
+        .replace(/"(?:[^"]|"")*"/g, '""');
 
+      const joinRe = /\b(?:(?:LEFT|RIGHT|FULL)\s+(?:OUTER\s+)?|INNER\s+|CROSS\s+|NATURAL\s+)?JOIN\b/gi;
+      const stopRe = /^(?:(?:LEFT|RIGHT|FULL|INNER|CROSS|NATURAL)\b|JOIN\b|WHERE\b|GROUP\b|ORDER\b|HAVING\b|LIMIT\b|UNION\b|EXCEPT\b|INTERSECT\b|;)/i;
+      let m;
+      while ((m = joinRe.exec(s)) !== null) {
+        const kw = m[0].replace(/\s+/g, ' ').toUpperCase();
+        if (/^(CROSS|NATURAL)/.test(kw)) continue;   // these legally have no ON
+        let depth = 0, found = false;
+        for (let i = joinRe.lastIndex; i < s.length; i++) {
+          const c = s[i];
+          if (c === '(') { depth++; continue; }
+          if (c === ')') { if (--depth < 0) break; continue; }
+          if (depth !== 0 || /\w/.test(s[i - 1] || '')) continue;
+          const rest = s.slice(i);
+          if (/^(?:ON|USING)\b/i.test(rest)) { found = true; break; }
+          if (stopRe.test(rest)) break;
+        }
+        if (!found) return `Syntax error: "${kw}" must be followed by an ON condition, e.g. ${kw} TableB ON TableA.ID = TableB.ID. Do not use WHERE to join tables after JOIN.`;
+      }
+      return null;
+    }
+    
     function executeEditorSQL() {
       if (!db) return alert("Please load a database first.");
       let sqlText = document.getElementById('sql-editor').value.trim();
@@ -562,6 +590,8 @@
 
       const container = document.getElementById('results-section');
       container.innerHTML = '';
+      const joinError = checkJoinHasOn(sqlText);
+      if (joinError) return renderError(joinError, container);
       try {
         const results = db.exec(sqlText);
         if (!results.length) {
